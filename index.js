@@ -109,7 +109,7 @@ function checkTelegramHash(data, hash) {
 
 // API авторизации через WebApp
 app.post('/api/auth', async (req, res) => {
-    const { hash, id, first_name, last_name, username, photo_url, auth_date } = req.body;
+    const { hash, id, first_name, last_name, username, phone, auth_date } = req.body;
 
     if (!checkTelegramHash(req.body, hash)) {
         return res.status(401).json({ success: false, error: 'Неверная подпись' });
@@ -136,13 +136,13 @@ app.post('/api/auth', async (req, res) => {
             const referral_code = crypto.randomBytes(8).toString('hex');
             const marzban_username = 'tg_' + id + '_' + Date.now();
 
-            const username = (first_name || '') + ' ' + (last_name || '');
-            const cleanUsername = username.trim();
+            // phone приходит из Telegram WebApp при запросе с кнопки
+            const phoneNumber = phone || null;
 
             const result = await db.execute(
-                `INSERT INTO users (tg_id, username, photo_url, referral_code, marzban_username)
+                `INSERT INTO users (tg_id, username, phone_number, referral_code, marzban_username)
                  VALUES (?, ?, ?, ?, ?)`,
-                [id, cleanUsername, photo_url || '', referral_code, marzban_username]
+                [id, first_name, phoneNumber, referral_code, marzban_username]
             );
             user_id = result[0].insertId;
         } else {
@@ -152,7 +152,7 @@ app.post('/api/auth', async (req, res) => {
         res.json({
             success: true,
             redirect: `${SITE_URL}/login.php?tg_auth=1`,
-            user: { id, first_name, last_name, username, user_id }
+            user: { id, first_name, last_name, username: first_name, user_id }
         });
     } catch (e) {
         console.error('Auth error:', e);
