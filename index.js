@@ -12,11 +12,11 @@ const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.TG_BOT_TOKEN || '';
 const SITE_URL = process.env.SITE_URL || 'https://gmbase.net';
 
-// Подключение к БД
+// Подключение к БД через пул
 async function getDB() {
-    if (global.db) return global.db;
+    if (global.dbPool) return global.dbPool;
 
-    global.db = await mysql.createConnection({
+    global.dbPool = mysql.createPool({
         host: process.env.DB_HOST || 'localhost',
         port: process.env.DB_PORT || 3306,
         user: process.env.DB_USER || 'root',
@@ -24,9 +24,17 @@ async function getDB() {
         database: process.env.DB_NAME || '',
         waitForConnections: true,
         connectionLimit: 10,
-        queueLimit: 0
+        queueLimit: 0,
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 0
     });
-    return global.db;
+    return global.dbPool;
+}
+
+// Функция для выполнения запросов из пула
+async function dbQuery(sql, params) {
+    const pool = await getDB();
+    return await pool.execute(sql, params);
 }
 
 // Хранилище для polling
