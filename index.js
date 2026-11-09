@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const crypto = require('crypto');
+const mysql = require('mysql2/promise');
 
 const app = express();
 app.use(express.json());
@@ -10,6 +11,23 @@ app.use(express.urlencoded({ extended: true }));
 const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.TG_BOT_TOKEN || '';
 const SITE_URL = process.env.SITE_URL || 'https://gmbase.net';
+
+// Подключение к БД
+async function getDB() {
+    if (global.db) return global.db;
+
+    global.db = await mysql.createConnection({
+        host: process.env.DB_HOST || 'localhost',
+        port: process.env.DB_PORT || 3306,
+        user: process.env.DB_USER || 'root',
+        password: process.env.DB_PASS || '',
+        database: process.env.DB_NAME || '',
+        waitForConnections: true,
+        connectionLimit: 10,
+        queueLimit: 0
+    });
+    return global.db;
+}
 
 // Хранилище для polling
 let updateOffset = 0;
@@ -98,11 +116,40 @@ app.post('/api/auth', async (req, res) => {
         return res.status(400).json({ success: false, error: 'Недостаточно данных' });
     }
 
-    res.json({
-        success: true,
-        redirect: `${SITE_URL}/login.php`,
-        user: { id, first_name, last_name, username }
-    });
+    try {
+        const db = await getDB();
+
+        // Ищем пользователя по tg_id
+        let [rows] = await db.execute('SELECT id FROM users WHERE tg_id = ?', [id]);
+
+        let user_id;
+        if (rows.length === 0) {
+            // Создаём нового пользователя
+            const referral_code = crypto.randomBytes(8).toString('hex');
+            const marzban_username = 'tg_' + id + '_' + Date.now();
+
+            const username = (first_name || '') + ' ' + (last_name || '');
+            const cleanUsername = username.trim();
+
+            const result = await db.execute(
+                `INSERT INTO users (tg_id, username, photo_url, referral_code, marzban_username)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [id, cleanUsername, photo_url || '', referral_code, marzban_username]
+            );
+            user_id = result[0].insertId;
+        } else {
+            user_id = rows[0].id;
+        }
+
+        res.json({
+            success: true,
+            redirect: `${SITE_URL}/login.php?tg_auth=1`,
+            user: { id, first_name, last_name, username, user_id }
+        });
+    } catch (e) {
+        console.error('Auth error:', e);
+        res.status(500).json({ success: false, error: 'Ошибка базы данных' });
+    }
 });
 
 // Polling обработчик
@@ -177,12 +224,22 @@ setInterval(async () => {
     } catch (e) {}
 }, 2000);
 
-app.listen(PORT, () => {
+// Запуск сервера
+app.listen(PORT, async () => {
     console.log(`🤖 Telegram bot запущен на порту ${PORT}`);
     console.log(`📌 SITE_URL: ${SITE_URL}`);
+
     if (BOT_TOKEN) {
         console.log('✅ Bot token configured');
     } else {
         console.warn('⚠️ TG_BOT_TOKEN не установлен');
+    }
+
+    // Проверка БД
+    try {
+        const db = await getDB();
+        console.log('✅ Database connected');
+    } catch (e) {
+        console.warn('⚠️ Database connection failed:', e.message);
     }
 });
